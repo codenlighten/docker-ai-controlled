@@ -1,9 +1,9 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import si from 'systeminformation';
-import fs from 'fs/promises';
-import fsSync from 'fs';
+import * as si from 'systeminformation';
+import { promises as fs } from 'fs';
+import * as fsSync from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
@@ -13,9 +13,10 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
 const logFile = '/var/log/ai-system/system-setup.log';
+const port = process.env.MONITOR_PORT || 3000;
 
 // Serve static files
-app.use(express.static(path.join(__dirname)));
+app.use(express.static(__dirname));
 
 // System monitoring data
 let systemStats = {
@@ -108,9 +109,6 @@ async function updateSystemStats() {
     }
 }
 
-// Update stats every 5 seconds
-setInterval(updateSystemStats, 5000);
-
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('Client connected');
@@ -124,7 +122,9 @@ io.on('connection', (socket) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-    console.log(`Monitor server running on port ${PORT}`);
+httpServer.listen(port, () => {
+    console.log(`Monitor server running on port ${port}`);
 });
+
+// Update stats every 5 seconds
+setInterval(updateSystemStats, 5000);
