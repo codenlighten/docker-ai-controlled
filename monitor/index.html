@@ -13,7 +13,7 @@
             <h1 class="text-3xl font-bold mb-2">AI System Monitor</h1>
             <div class="flex space-x-4">
                 <div id="status" class="px-4 py-2 rounded-full bg-green-500">System Online</div>
-                <div id="activeBot" class="px-4 py-2 rounded-full bg-blue-500">No Active Bot</div>
+                <div id="socketStatus" class="px-4 py-2 rounded-full bg-yellow-500">Socket Connecting...</div>
             </div>
         </header>
 
@@ -79,60 +79,58 @@
             <!-- System Logs -->
             <div class="bg-gray-800 p-6 rounded-lg">
                 <h2 class="text-xl font-semibold mb-4">System Logs</h2>
-                <div id="systemLogs" class="font-mono text-sm bg-gray-900 p-4 rounded max-h-60 overflow-y-auto">
-                    <!-- Logs will be populated here -->
+                <div id="systemLogs" class="font-mono text-sm bg-gray-900 p-4 rounded max-h-[600px] overflow-y-auto whitespace-pre">
+                    Waiting for logs...
                 </div>
             </div>
         </div>
     </div>
 
     <script>
+        console.log('Starting socket connection...');
         const socket = io();
+        
+        // Socket connection status
+        socket.on('connect', () => {
+            console.log('Socket connected!');
+            document.getElementById('socketStatus').textContent = 'Socket Connected';
+            document.getElementById('socketStatus').className = 'px-4 py-2 rounded-full bg-green-500';
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Socket connection error:', error);
+            document.getElementById('socketStatus').textContent = 'Connection Error';
+            document.getElementById('socketStatus').className = 'px-4 py-2 rounded-full bg-red-500';
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Socket disconnected');
+            document.getElementById('socketStatus').textContent = 'Disconnected';
+            document.getElementById('socketStatus').className = 'px-4 py-2 rounded-full bg-red-500';
+        });
         
         // Update system stats
         socket.on('systemStats', (stats) => {
+            console.log('Received system stats:', stats);
             document.getElementById('cpuUsage').textContent = stats.cpu + '%';
             document.getElementById('memoryUsage').textContent = stats.memory + '%';
-            document.getElementById('diskUsage').textContent = stats.disk + '%';
+            document.getElementById('diskUsage').textContent = stats.disk;
             document.getElementById('networkStatus').textContent = stats.network;
-        });
-
-        // Update bot status
-        socket.on('botStatus', (status) => {
-            document.getElementById('activeBot').textContent = status.activeBot;
-            const botStatus = document.getElementById('botStatus');
-            status.bots.forEach(bot => {
-                const botElement = botStatus.querySelector(`[data-bot="${bot.name}"]`);
-                if (botElement) {
-                    botElement.querySelector('.status-badge').className = 
-                        `status-badge px-2 py-1 rounded-full bg-${bot.active ? 'green' : 'red'}-500`;
-                }
-            });
-        });
-
-        // Add new action
-        socket.on('newAction', (action) => {
-            const recentActions = document.getElementById('recentActions');
-            const actionElement = document.createElement('div');
-            actionElement.className = 'p-2 bg-gray-700 rounded';
-            actionElement.innerHTML = `
-                <div class="flex justify-between">
-                    <span class="font-semibold">${action.bot}</span>
-                    <span class="text-gray-400 text-sm">${action.timestamp}</span>
-                </div>
-                <div class="text-sm">${action.description}</div>
-            `;
-            recentActions.insertBefore(actionElement, recentActions.firstChild);
         });
 
         // Add new log
         socket.on('newLog', (log) => {
+            console.log('Received new log:', log);
             const systemLogs = document.getElementById('systemLogs');
-            const logElement = document.createElement('div');
-            logElement.className = 'text-sm';
-            logElement.innerHTML = `<span class="text-gray-400">[${log.timestamp}]</span> ${log.message}`;
-            systemLogs.insertBefore(logElement, systemLogs.firstChild);
+            systemLogs.textContent = log.message || 'No log content';
+            systemLogs.scrollTop = systemLogs.scrollHeight;
         });
+
+        // Log any errors
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            console.error('Window Error:', msg, 'at', url, lineNo, columnNo, error);
+            return false;
+        };
     </script>
 </body>
 </html>

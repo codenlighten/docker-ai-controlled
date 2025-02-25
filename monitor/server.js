@@ -5,6 +5,7 @@ import { exec } from 'child_process';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -23,7 +24,7 @@ let systemStats = {
 };
 
 // Bot status tracking
-const bots = {
+const botStatus = {
     SecGuard: { active: true, lastAction: Date.now() },
     PkgMaster: { active: true, lastAction: Date.now() },
     NetConfig: { active: true, lastAction: Date.now() },
@@ -34,6 +35,8 @@ const bots = {
 // Update system stats
 async function updateSystemStats() {
     try {
+        console.log('Updating system stats...');
+        
         // CPU Usage
         const cpuUsage = os.loadavg()[0] * 100 / os.cpus().length;
         systemStats.cpu = cpuUsage.toFixed(1);
@@ -56,35 +59,48 @@ async function updateSystemStats() {
             systemStats.network = error ? 'Disconnected' : 'Connected';
         });
 
+        // Read AI logs
+        try {
+            console.log('Reading AI logs...');
+            const logContent = await fs.readFile('/var/log/ai-system/system-setup.log', 'utf8');
+            console.log('Log content length:', logContent.length);
+            io.emit('newLog', { 
+                timestamp: new Date().toISOString(),
+                message: logContent || 'No log content available'
+            });
+        } catch (error) {
+            console.error('Error reading AI log:', error);
+            io.emit('newLog', {
+                timestamp: new Date().toISOString(),
+                message: `Error reading logs: ${error.message}`
+            });
+        }
+
+        // Emit updated stats
+        console.log('Emitting system stats:', systemStats);
         io.emit('systemStats', systemStats);
     } catch (error) {
         console.error('Error updating system stats:', error);
     }
 }
 
+// Update stats every 5 seconds
+setInterval(updateSystemStats, 5000);
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
     console.log('Client connected');
-
-    // Send initial data
+    
+    // Send initial stats
     socket.emit('systemStats', systemStats);
-    socket.emit('botStatus', {
-        bots: Object.entries(bots).map(([name, status]) => ({
-            name,
-            active: status.active
-        }))
-    });
 
     socket.on('disconnect', () => {
         console.log('Client disconnected');
     });
 });
 
-// Update stats every 5 seconds
-setInterval(updateSystemStats, 5000);
-
 // Start server
-const PORT = process.env.MONITOR_PORT || 3000;
+const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
     console.log(`Monitor server running on port ${PORT}`);
 });
