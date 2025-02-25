@@ -1,7 +1,11 @@
 FROM ubuntu:22.04
 
 # Prevent interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    NEEDRESTART_MODE=a \
+    UCF_FORCE_CONFOLD=1 \
+    NEEDRESTART_SUSPEND=1 \
+    APT_LISTCHANGES_FRONTEND=none
 
 # Install Node.js and system administration packages
 RUN apt-get update && apt-get install -y \
@@ -26,6 +30,8 @@ RUN apt-get update && apt-get install -y \
     iptables \
     systemd \
     docker.io \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs \
     && apt-get clean \

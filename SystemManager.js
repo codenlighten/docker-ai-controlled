@@ -350,4 +350,156 @@ class SystemOrchestrator {
     }
 }
 
-export { SystemOrchestrator, SystemBot, SystemCommand };
+class SystemManager {
+    constructor(apiKey) {
+        this.communicator = new CompressedAICommunicator(apiKey);
+        this.logFile = '/var/log/ai-system/system-setup.log';
+        this.maxLogSize = 1024 * 1024; // 1MB
+        this.rotatedLogsToKeep = 5;
+        this.ensureLogFileExists();
+    }
+
+    async ensureLogFileExists() {
+        try {
+            if (!(await fs.exists(this.logFile))) {
+                await fs.writeFile(this.logFile, '', { mode: 0o666 });
+            }
+            // Ensure proper permissions even if file exists
+            await fs.chmod(this.logFile, 0o666);
+        } catch (error) {
+            console.error('Error creating/setting permissions for log file:', error);
+        }
+    }
+
+    async rotateLogsIfNeeded() {
+        try {
+            const stats = await fs.stat(this.logFile);
+            if (stats.size >= this.maxLogSize) {
+                const content = await fs.readFile(this.logFile, 'utf8');
+                const lines = content.split('\n');
+                const linesToKeep = Math.floor(lines.length * 0.75);
+                const newContent = lines.slice(-linesToKeep).join('\n');
+
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const backupFile = `${this.logFile}.${timestamp}`;
+                await fs.rename(this.logFile, backupFile);
+                await fs.writeFile(this.logFile, newContent, { mode: 0o666 });
+
+                const dir = path.dirname(this.logFile);
+                const files = await fs.readdir(dir);
+                const rotatedLogs = files
+                    .filter(f => f.startsWith(path.basename(this.logFile) + '.'))
+                    .map(f => path.join(dir, f))
+                    .sort()
+                    .reverse();
+
+                for (let i = this.rotatedLogsToKeep; i < rotatedLogs.length; i++) {
+                    await fs.unlink(rotatedLogs[i]);
+                }
+            }
+        } catch (error) {
+            console.error('Error rotating logs:', error);
+        }
+    }
+
+    async logToFile(message) {
+        try {
+            const timestamp = new Date().toISOString();
+            const logMessage = `[${timestamp}] ${message}\n`;
+            await this.rotateLogsIfNeeded();
+            await fs.appendFile(this.logFile, logMessage);
+        } catch (error) {
+            console.error('Error writing to log file:', error);
+        }
+    }
+
+    async executeCommand(command) {
+        await this.logToFile(`Executing: ${command}`);
+        
+        return new Promise((resolve, reject) => {
+            // Set environment variables to prevent interactive prompts
+            const env = {
+                ...process.env,
+                DEBIAN_FRONTEND: 'noninteractive',
+                NEEDRESTART_MODE: 'a',
+                UCF_FORCE_CONFOLD: '1',
+                NEEDRESTART_SUSPEND: '1',
+                APT_LISTCHANGES_FRONTEND: 'none'
+            };
+
+            // Add options to prevent interactive prompts
+            const modifiedCommand = command.replace(
+                /apt\s+(update|upgrade|install|dist-upgrade)/,
+                '$& -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"'
+            );
+
+            const proc = spawn('bash', ['-c', modifiedCommand], {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env
+            });
+
+            let output = '';
+            let error = '';
+
+            proc.stdout.on('data', async (data) => {
+                output += data;
+                await this.logToFile(`Output: ${data}`);
+            });
+
+            proc.stderr.on('data', async (data) => {
+                error += data;
+                await this.logToFile(`Error: ${data}`);
+
+                // Handle specific prompts if they occur
+                if (data.toString().includes('restart services') || 
+                    data.toString().includes('restart system') ||
+                    data.toString().includes('[Y/n]') ||
+                    data.toString().includes('[y/N]')) {
+                    proc.stdin.write('y\n');
+                }
+            });
+
+            proc.on('close', async (code) => {
+                await this.logToFile(`Command completed with code: ${code}`);
+                if (code === 0) {
+                    resolve({ output, error });
+                } else {
+                    reject(new Error(`Command failed with code ${code}: ${error}`));
+                }
+            });
+        });
+    }
+
+    async analyzeSystem() {
+        try {
+            await this.logToFile('Starting system analysis...');
+            await this.logToFile('Initializing System Orchestrator...');
+            
+            // Define commands with noninteractive flags
+            const commands = [
+                'DEBIAN_FRONTEND=noninteractive apt update',
+                'DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"',
+                'ufw enable',
+                'DEBIAN_FRONTEND=noninteractive apt install fail2ban -y'
+            ];
+
+            await this.logToFile('Executing system setup commands...');
+            await this.logToFile('Executing queued commands...\n');
+
+            for (const command of commands) {
+                try {
+                    await this.logToFile(`\nExecuting: ${command}\n`);
+                    const response = await this.communicator.getSystemAnalysis();
+                    await this.logToFile(`\nSysWatch's analysis: ${JSON.stringify(response, null, 2)}\n`);
+                } catch (error) {
+                    await this.logToFile(`Error executing command ${command}: ${error.message}`);
+                }
+            }
+        } catch (error) {
+            await this.logToFile(`Error in system analysis: ${error.message}`);
+            throw error;
+        }
+    }
+}
+
+export { SystemOrchestrator, SystemBot, SystemCommand, SystemManager };
