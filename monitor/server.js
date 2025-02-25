@@ -1,16 +1,18 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { exec } from 'child_process';
-import os from 'os';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import si from 'systeminformation';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import path from 'path';
+import os from 'os';
+import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer);
+const logFile = '/var/log/ai-system/system-setup.log';
 
 // Serve static files
 app.use(express.static(path.join(__dirname)));
@@ -32,53 +34,75 @@ const botStatus = {
     SysWatch: { active: true, lastAction: Date.now() }
 };
 
-// Update system stats
+async function getSystemStats() {
+    try {
+        const cpu = await si.currentLoad();
+        const mem = await si.mem();
+        const disk = await si.fsSize();
+        const network = await si.networkInterfaces();
+
+        return {
+            cpu: cpu.currentLoad.toFixed(1),
+            memory: ((mem.used / mem.total) * 100).toFixed(1),
+            disk: disk[0] ? `${Math.round(disk[0].use)}%` : 'N/A',
+            network: network[0] && network[0].operstate === 'up' ? 'Connected' : 'Disconnected'
+        };
+    } catch (error) {
+        console.error('Error getting system stats:', error);
+        return { error: 'Failed to get system stats' };
+    }
+}
+
+async function readLatestLogs() {
+    try {
+        // Get all log files (current and rotated)
+        const dir = path.dirname(logFile);
+        const files = await fs.readdir(dir);
+        const logFiles = [logFile, ...files
+            .filter(f => f.startsWith(path.basename(logFile) + '.'))
+            .map(f => path.join(dir, f))
+            .sort()
+            .reverse()
+        ];
+
+        let combinedContent = '';
+        let totalSize = 0;
+        const maxSize = 100 * 1024; // Read up to 100KB of logs
+
+        // Read from each log file until we reach maxSize
+        for (const file of logFiles) {
+            if (fsSync.existsSync(file)) {
+                const content = await fs.readFile(file, 'utf8');
+                combinedContent = content + '\n' + combinedContent;
+                totalSize += content.length;
+                
+                if (totalSize >= maxSize) {
+                    break;
+                }
+            }
+        }
+
+        console.log('Log content length:', combinedContent.length);
+        return combinedContent;
+    } catch (error) {
+        console.error('Error reading AI log:', error);
+        return '';
+    }
+}
+
 async function updateSystemStats() {
     try {
         console.log('Updating system stats...');
-        
-        // CPU Usage
-        const cpuUsage = os.loadavg()[0] * 100 / os.cpus().length;
-        systemStats.cpu = cpuUsage.toFixed(1);
-
-        // Memory Usage
-        const totalMem = os.totalmem();
-        const freeMem = os.freemem();
-        const memUsage = ((totalMem - freeMem) / totalMem * 100).toFixed(1);
-        systemStats.memory = memUsage;
-
-        // Disk Usage
-        exec('df -h / | tail -n 1 | awk \'{print $5}\'', (error, stdout) => {
-            if (!error) {
-                systemStats.disk = stdout.trim();
-            }
+        const stats = await getSystemStats();
+        const logs = await readLatestLogs();
+        console.log('Reading AI logs...');
+        console.log('Log content length:', logs.length);
+        console.log('Emitting system stats:', stats);
+        io.emit('systemStats', stats);
+        io.emit('newLog', { 
+            timestamp: new Date().toISOString(),
+            message: logs || 'No log content available'
         });
-
-        // Network Status
-        exec('ping -c 1 8.8.8.8', (error) => {
-            systemStats.network = error ? 'Disconnected' : 'Connected';
-        });
-
-        // Read AI logs
-        try {
-            console.log('Reading AI logs...');
-            const logContent = await fs.readFile('/var/log/ai-system/system-setup.log', 'utf8');
-            console.log('Log content length:', logContent.length);
-            io.emit('newLog', { 
-                timestamp: new Date().toISOString(),
-                message: logContent || 'No log content available'
-            });
-        } catch (error) {
-            console.error('Error reading AI log:', error);
-            io.emit('newLog', {
-                timestamp: new Date().toISOString(),
-                message: `Error reading logs: ${error.message}`
-            });
-        }
-
-        // Emit updated stats
-        console.log('Emitting system stats:', systemStats);
-        io.emit('systemStats', systemStats);
     } catch (error) {
         console.error('Error updating system stats:', error);
     }

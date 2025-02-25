@@ -289,9 +289,50 @@ class SystemOrchestrator {
             const logFile = '/var/log/ai-system/system-setup.log';
             const timestamp = new Date().toISOString();
             const logMessage = `[${timestamp}] ${message}\n`;
+            
+            await this.rotateLogsIfNeeded(logFile);
             await fs.appendFile(logFile, logMessage);
         } catch (error) {
             console.error('Error writing to log file:', error);
+        }
+    }
+
+    async rotateLogsIfNeeded(logFile) {
+        try {
+            const stats = await fs.stat(logFile);
+            if (stats.size >= 1024 * 1024) { // 1MB
+                // Read the current log content
+                const content = await fs.readFile(logFile, 'utf8');
+                
+                // Split into lines and keep the most recent 75% of the content
+                const lines = content.split('\n');
+                const linesToKeep = Math.floor(lines.length * 0.75);
+                const newContent = lines.slice(-linesToKeep).join('\n');
+
+                // Backup the old log
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+                const backupFile = `${logFile}.${timestamp}`;
+                await fs.rename(logFile, backupFile);
+
+                // Create new log file with the most recent content
+                await fs.writeFile(logFile, newContent, { mode: 0o666 });
+
+                // Clean up old rotated logs
+                const dir = path.dirname(logFile);
+                const files = await fs.readdir(dir);
+                const rotatedLogs = files
+                    .filter(f => f.startsWith(path.basename(logFile) + '.'))
+                    .map(f => path.join(dir, f))
+                    .sort()
+                    .reverse();
+
+                // Keep only the specified number of rotated logs
+                for (let i = 5; i < rotatedLogs.length; i++) {
+                    await fs.unlink(rotatedLogs[i]);
+                }
+            }
+        } catch (error) {
+            console.error('Error rotating logs:', error);
         }
     }
 
