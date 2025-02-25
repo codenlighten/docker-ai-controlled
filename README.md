@@ -59,10 +59,14 @@ The system consists of two main services:
 - `NODE_ENV`: Environment (production/development)
 - `MONITOR_PORT`: Port for the monitor service
 
-### Log Files
+### Log Management
 
-- Main log file: `/var/log/ai-system/system-setup.log`
-- Permissions are automatically set during installation
+The system implements automatic log rotation with these features:
+- Maximum log file size: 1MB
+- Retains 5 most recent log archives
+- Preserves 75% of most recent log content during rotation
+- Log files are stored in `/var/log/ai-system/`
+- Rotated logs are named: `system-setup.log.<timestamp>`
 
 ## Common Commands
 
@@ -84,6 +88,12 @@ The system consists of two main services:
 4. Start services:
    ```bash
    sudo docker-compose up -d
+   ```
+
+5. View system logs:
+   ```bash
+   sudo ls -l /var/log/ai-system/
+   sudo cat /var/log/ai-system/system-setup.log
    ```
 
 ## Troubleshooting
@@ -113,6 +123,10 @@ If you see "Error reading AI log":
    sudo touch /var/log/ai-system/system-setup.log
    sudo chmod 666 /var/log/ai-system/system-setup.log
    ```
+3. View available log archives:
+   ```bash
+   ls -l /var/log/ai-system/system-setup.log.*
+   ```
 
 ### Container Issues
 
@@ -136,6 +150,7 @@ If containers keep restarting:
 2. Log files are world-readable/writable (666)
 3. Secure your OpenAI API key
 4. Consider network security when exposing ports
+5. Log rotation helps prevent disk space issues
 
 ## Maintenance
 
@@ -152,6 +167,18 @@ If containers keep restarting:
    sudo docker system prune
    ```
 
+3. Manage logs:
+   ```bash
+   # View current log size
+   ls -lh /var/log/ai-system/system-setup.log
+
+   # List archived logs
+   ls -lh /var/log/ai-system/system-setup.log.*
+
+   # Clean up old archives (if needed)
+   sudo rm /var/log/ai-system/system-setup.log.*
+   ```
+
 ## Support
 
 If you encounter issues:
@@ -159,6 +186,7 @@ If you encounter issues:
 2. Review container logs
 3. Verify all prerequisites are met
 4. Ensure proper permissions
+5. Check log rotation status
 
 ## License
 
