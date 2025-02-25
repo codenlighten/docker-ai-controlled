@@ -1,0 +1,15 @@
+[Unit]
+Description=AI System Management Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/ai-system
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/ai-system/system-startup.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
