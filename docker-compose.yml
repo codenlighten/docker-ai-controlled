@@ -5,13 +5,15 @@ services:
     build: .
     container_name: ai-system
     volumes:
-      - ./logs:/var/log/ai-system
-      - ./.env:/opt/ai-system/.env
+      - /var/log/ai-system:/var/log/ai-system
+    env_file:
+      - .env
     environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - NODE_ENV=production
       - MONITOR_PORT=3000
     privileged: true
-    restart: unless-stopped
+    restart: on-failure:3
     ports:
       - "3000:3000"
     networks:
@@ -28,9 +30,12 @@ services:
       dockerfile: Dockerfile.monitor
     container_name: ai-system-monitor
     volumes:
+      - /var/log/ai-system:/var/log/ai-system
       - ./monitor:/opt/ai-system/monitor
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - MONITOR_PORT=8080

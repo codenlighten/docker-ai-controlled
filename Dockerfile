@@ -31,10 +31,13 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set up system configurations
+# Set up system configurations and log files
 RUN mkdir -p /etc/ai-system/configs \
     && mkdir -p /var/log/ai-system \
-    && mkdir -p /opt/ai-system/scripts
+    && mkdir -p /opt/ai-system/scripts \
+    && touch /var/log/ai-system/system-setup.log \
+    && chmod 777 /var/log/ai-system \
+    && chmod 666 /var/log/ai-system/system-setup.log
 
 # Set up application directory
 WORKDIR /opt/ai-system
@@ -50,14 +53,15 @@ COPY . .
 
 # Environment variables for configuration
 ENV NODE_ENV=production \
-    AI_SYSTEM_CONFIG=/etc/ai-system/configs \
-    AI_SYSTEM_LOGS=/var/log/ai-system \
-    AI_SYSTEM_SCRIPTS=/opt/ai-system/scripts \
-    PATH="/opt/ai-system/scripts:${PATH}"
+    MONITOR_PORT=3000
 
-# Expose port
-EXPOSE 8080
+# Create a script to start the application
+RUN echo '#!/bin/bash\n\
+echo "Starting AI system with OpenAI API key: $OPENAI_API_KEY"\n\
+touch /var/log/ai-system/system-setup.log\n\
+chmod 666 /var/log/ai-system/system-setup.log\n\
+exec npm start' > /opt/ai-system/start.sh && \
+    chmod +x /opt/ai-system/start.sh
 
-# Start the application with full privileges
-USER root
-CMD ["npm", "start"]
+# Set the entrypoint
+ENTRYPOINT ["/opt/ai-system/start.sh"]

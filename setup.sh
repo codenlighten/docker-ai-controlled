@@ -24,28 +24,50 @@ if ! command -v docker-compose &> /dev/null; then
     chmod +x /usr/local/bin/docker-compose
 fi
 
-# Create necessary directories
-echo "Setting up directories..."
-mkdir -p logs
-chmod 755 logs
+# Create necessary directories and files with proper permissions
+echo "Setting up directories and log files..."
+mkdir -p /var/log/ai-system
+touch /var/log/ai-system/system-setup.log
+chmod 777 /var/log/ai-system
+chmod 666 /var/log/ai-system/system-setup.log
 
-# Check for .env file
+# Check for .env file and OpenAI API key
 if [ ! -f .env ]; then
     echo "Creating .env file..."
     if [ -f .env.example ]; then
         cp .env.example .env
-        echo "Please edit .env and add your OpenAI API key"
     else
         echo "OPENAI_API_KEY=" > .env
         echo "NODE_ENV=production" >> .env
         echo "MONITOR_PORT=3000" >> .env
-        echo "Please edit .env and add your OpenAI API key"
     fi
 fi
 
-# Build and start containers
+# Prompt for OpenAI API key if not set
+if ! grep -q "OPENAI_API_KEY=sk-" .env; then
+    echo ""
+    echo "OpenAI API key is required!"
+    echo "Please enter your OpenAI API key (starts with 'sk-'):"
+    read -r api_key
+    if [[ $api_key == sk-* ]]; then
+        # Export the API key to environment
+        export OPENAI_API_KEY=$api_key
+        # Update .env file
+        sed -i "s/OPENAI_API_KEY=.*/OPENAI_API_KEY=$api_key/" .env
+        echo "API key has been set!"
+    else
+        echo "Error: Invalid API key format. Must start with 'sk-'"
+        exit 1
+    fi
+else
+    # Export existing API key from .env
+    export OPENAI_API_KEY=$(grep OPENAI_API_KEY .env | cut -d= -f2)
+fi
+
+# Build and start containers with environment variables
 echo "Building and starting services..."
-docker-compose build
+docker-compose down
+docker-compose build --no-cache
 docker-compose up -d
 
 # Check if services are running
@@ -55,6 +77,10 @@ if docker-compose ps | grep -q "ai-system"; then
     echo "AI System is running!"
     echo "Monitor available at: http://localhost:3000"
     echo "Dashboard available at: http://localhost:8080"
+    echo ""
+    echo "To view logs, run: sudo docker-compose logs -f"
+    echo "To restart services, run: sudo docker-compose restart"
+    echo "To stop services, run: sudo docker-compose down"
 else
     echo "Error: Services failed to start. Check logs with: docker-compose logs"
 fi
