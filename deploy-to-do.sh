@@ -17,6 +17,12 @@ if [ -z "$DO" ]; then
     exit 1
 fi
 
+# Check if OpenAI API key is set
+if [ -z "$OPENAI_API_KEY" ]; then
+    echo "OpenAI API key not found in .env file"
+    exit 1
+fi
+
 # Check if doctl is installed
 if ! command -v doctl &> /dev/null; then
     echo "doctl not found. Installing..."
@@ -27,17 +33,21 @@ fi
 echo "Authenticating with DigitalOcean..."
 doctl auth init -t $DO
 
+# Create temporary spec file with secrets
+echo "Preparing deployment configuration..."
+TMP_SPEC="temp_deployment_spec.yaml"
+cp do-deployment.yaml "$TMP_SPEC"
+sed -i "s|\${OPENAI_API_KEY}|$OPENAI_API_KEY|g" "$TMP_SPEC"
+
 # Create app
 echo "Creating DigitalOcean App..."
-doctl apps create --spec do-deployment.yaml
+APP_CREATE_OUTPUT=$(doctl apps create --spec "$TMP_SPEC" --format ID --no-header)
+APP_ID=$(echo "$APP_CREATE_OUTPUT" | tr -d '\n')
 
-# Get the app ID
-APP_ID=$(doctl apps list --format ID --no-header | head -n 1)
+echo "App created with ID: $APP_ID"
 
-# Add secrets
-echo "Adding secrets..."
-read -p "Enter your OpenAI API key: " OPENAI_API_KEY
-doctl apps update $APP_ID --spec do-deployment.yaml --set-secret OPENAI_API_KEY=$OPENAI_API_KEY
+# Clean up temporary file
+rm "$TMP_SPEC"
 
 # Deploy the app
 echo "Deploying the application..."

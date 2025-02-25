@@ -7,9 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
-    software-properties-common \
-    sudo \
-    vim \
     net-tools \
     iputils-ping \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
@@ -17,32 +14,27 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
-WORKDIR /opt/ai-system
+# Create non-root user
+RUN useradd -m -s /bin/bash node
 
-# Copy package files
-COPY package*.json ./
+# Create app directory and set permissions
+WORKDIR /opt/ai-system
+RUN chown -R node:node /opt/ai-system
+
+# Switch to non-root user
+USER node
+
+# Copy package files with correct ownership
+COPY --chown=node:node package*.json ./
 
 # Install dependencies
 RUN npm install
 
-# Copy application files
-COPY . .
+# Copy application files with correct ownership
+COPY --chown=node:node . .
 
-# Create log directory
-RUN mkdir -p /var/log/ai-system && \
-    chmod 755 /var/log/ai-system
+# Expose port
+EXPOSE 8080
 
-# Create a non-root user for running the application
-RUN useradd -m -s /bin/bash aiuser && \
-    echo "aiuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-# Switch to non-root user
-USER aiuser
-
-# Set environment variables
-ENV NODE_ENV=production
-ENV PATH=/opt/ai-system/node_modules/.bin:$PATH
-
-# Command to run the application
-CMD ["node", "system-startup.js"]
+# Start the application
+CMD ["npm", "start"]
