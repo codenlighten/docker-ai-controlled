@@ -361,10 +361,9 @@ class SystemManager {
 
     async ensureLogFileExists() {
         try {
-            if (!(await fs.exists(this.logFile))) {
+            if (!fsSync.existsSync(this.logFile)) {
                 await fs.writeFile(this.logFile, '', { mode: 0o666 });
             }
-            // Ensure proper permissions even if file exists
             await fs.chmod(this.logFile, 0o666);
         } catch (error) {
             console.error('Error creating/setting permissions for log file:', error);
@@ -413,11 +412,59 @@ class SystemManager {
         }
     }
 
+    async handleInteractivePrompt(prompt, command, previousOutput) {
+        try {
+            // Prepare context for AI analysis
+            const context = {
+                prompt: prompt,
+                command: command,
+                previousOutput: previousOutput,
+                systemState: {
+                    command_history: this.commandHistory || [],
+                    current_operation: command.split(' ')[0],
+                    is_package_management: command.includes('apt') || command.includes('dpkg'),
+                    is_system_update: command.includes('upgrade') || command.includes('update'),
+                    is_service_management: command.includes('service') || command.includes('systemctl'),
+                }
+            };
+
+            // Get AI recommendation
+            const response = await this.communicator.getPromptResponse({
+                role: "system",
+                content: `You are a system administrator reviewing an interactive prompt from a terminal command. 
+                         Based on the context, determine the appropriate response.
+                         Context: ${JSON.stringify(context, null, 2)}
+                         
+                         Respond with one of:
+                         1. "y" - Yes, proceed with the action
+                         2. "n" - No, do not proceed
+                         3. "d" - Use default option
+                         4. "k" - Keep existing configuration
+                         5. null - No response needed
+                         
+                         Only respond with one of these exact values.`
+            });
+
+            await this.logToFile(`AI analyzed prompt "${prompt}" for command "${command}" and recommended: ${response}`);
+            return response;
+        } catch (error) {
+            await this.logToFile(`Error getting AI recommendation: ${error.message}`);
+            return 'y'; // Default to yes if AI analysis fails
+        }
+    }
+
     async executeCommand(command) {
         await this.logToFile(`Executing: ${command}`);
         
         return new Promise((resolve, reject) => {
-            // Set environment variables to prevent interactive prompts
+            // Track command history
+            this.commandHistory = this.commandHistory || [];
+            this.commandHistory.push(command);
+            if (this.commandHistory.length > 10) {
+                this.commandHistory.shift();
+            }
+
+            // Set environment variables to prevent most interactive prompts
             const env = {
                 ...process.env,
                 DEBIAN_FRONTEND: 'noninteractive',
@@ -427,35 +474,50 @@ class SystemManager {
                 APT_LISTCHANGES_FRONTEND: 'none'
             };
 
-            // Add options to prevent interactive prompts
+            // Add options to prevent common interactive prompts
             const modifiedCommand = command.replace(
                 /apt\s+(update|upgrade|install|dist-upgrade)/,
                 '$& -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"'
             );
 
             const proc = spawn('bash', ['-c', modifiedCommand], {
-                stdio: ['ignore', 'pipe', 'pipe'],
+                stdio: ['pipe', 'pipe', 'pipe'],
                 env
             });
 
             let output = '';
             let error = '';
+            let currentPrompt = '';
 
             proc.stdout.on('data', async (data) => {
-                output += data;
-                await this.logToFile(`Output: ${data}`);
+                const text = data.toString();
+                output += text;
+                await this.logToFile(`Output: ${text}`);
+                
+                // Check for prompts in stdout
+                if (text.includes('[Y/n]') || text.includes('[y/N]') || 
+                    text.includes('(Y/I/N/O/D/Z)') || text.includes('[default=N]')) {
+                    currentPrompt = text;
+                    const response = await this.handleInteractivePrompt(text, command, output);
+                    if (response) {
+                        proc.stdin.write(`${response}\n`);
+                    }
+                }
             });
 
             proc.stderr.on('data', async (data) => {
-                error += data;
-                await this.logToFile(`Error: ${data}`);
+                const text = data.toString();
+                error += text;
+                await this.logToFile(`Error: ${text}`);
 
-                // Handle specific prompts if they occur
-                if (data.toString().includes('restart services') || 
-                    data.toString().includes('restart system') ||
-                    data.toString().includes('[Y/n]') ||
-                    data.toString().includes('[y/N]')) {
-                    proc.stdin.write('y\n');
+                // Check for prompts in stderr
+                if (text.includes('[Y/n]') || text.includes('[y/N]') || 
+                    text.includes('(Y/I/N/O/D/Z)') || text.includes('[default=N]')) {
+                    currentPrompt = text;
+                    const response = await this.handleInteractivePrompt(text, command, error);
+                    if (response) {
+                        proc.stdin.write(`${response}\n`);
+                    }
                 }
             });
 
@@ -475,7 +537,6 @@ class SystemManager {
             await this.logToFile('Starting system analysis...');
             await this.logToFile('Initializing System Orchestrator...');
             
-            // Define commands with noninteractive flags
             const commands = [
                 'DEBIAN_FRONTEND=noninteractive apt update',
                 'DEBIAN_FRONTEND=noninteractive apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"',
