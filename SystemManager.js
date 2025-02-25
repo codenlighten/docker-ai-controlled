@@ -283,6 +283,30 @@ class SystemOrchestrator {
 
         return report;
     }
+
+    async logToFile(message) {
+        try {
+            const logFile = '/var/log/ai-system/system-setup.log';
+            const timestamp = new Date().toISOString();
+            const logMessage = `[${timestamp}] ${message}\n`;
+            await fs.appendFile(logFile, logMessage);
+        } catch (error) {
+            console.error('Error writing to log file:', error);
+        }
+    }
+
+    async ensureLogFileExists() {
+        try {
+            const logFile = '/var/log/ai-system/system-setup.log';
+            if (!(await fs.exists(logFile))) {
+                await fs.writeFile(logFile, '', { mode: 0o666 });
+            }
+            // Ensure proper permissions even if file exists
+            await fs.chmod(logFile, 0o666);
+        } catch (error) {
+            console.error('Error creating/setting permissions for log file:', error);
+        }
+    }
 }
 
 export { SystemOrchestrator, SystemBot, SystemCommand };
